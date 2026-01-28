@@ -1,13 +1,9 @@
 import os
 import time
 import threading
-from flask import Flask, request
 
 from telegram import Update, ChatPermissions
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    ContextTypes, filters
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_IDS = set(int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip())
@@ -15,12 +11,9 @@ ADMIN_IDS = set(int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip
 LINK_LOCK = True
 TEMP_ACCESS = {}  # (chat_id, user_id) -> expiry_unix
 
-app = Flask(__name__)
-
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
-# ---- Telegram handlers ----
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Admin bot active. /help")
 
@@ -88,53 +81,39 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-def expiry_worker(tg_app: Application):
+def expiry_worker(app: Application):
     while True:
         now = int(time.time())
         expired = [(k, v) for k, v in TEMP_ACCESS.items() if v <= now]
         for (chat_id, user_id), _ in expired:
             try:
-                tg_app.bot.ban_chat_member(chat_id, user_id)
+                app.bot.ban_chat_member(chat_id, user_id)
             except:
                 pass
             TEMP_ACCESS.pop((chat_id, user_id), None)
         time.sleep(30)
 
-# ---- Build telegram app (NO Updater hacks) ----
-tg_app = Application.builder().token(BOT_TOKEN).build()
-tg_app.add_handler(CommandHandler("start", start))
-tg_app.add_handler(CommandHandler("help", help_cmd))
-tg_app.add_handler(CommandHandler("approve", approve))
-tg_app.add_handler(CommandHandler("remove", remove_user))
-tg_app.add_handler(CommandHandler("locklinks", locklinks))
-tg_app.add_handler(CommandHandler("unlocklinks", unlocklinks))
-tg_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, anti_link))
-
-# ---- Flask routes ----
-@app.get("/")
-def home():
-    return "OK", 200
-
-@app.post("/webhook")
-def webhook():
-    # Telegram sends JSON updates here
-    data = request.get_json(force=True)
-    update = Update.de_json(data, tg_app.bot)
-    # process update in event loop safely
-    tg_app.create_task(tg_app.process_update(update))
-    return "OK", 200
-
 def main():
-    # start expiry thread
-    threading.Thread(target=expiry_worker, args=(tg_app,), daemon=True).start()
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    # IMPORTANT: start PTB application (initializes bot)
-    tg_app.initialize()
-    tg_app.start()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("approve", approve))
+    application.add_handler(CommandHandler("remove", remove_user))
+    application.add_handler(CommandHandler("locklinks", locklinks))
+    application.add_handler(CommandHandler("unlocklinks", unlocklinks))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, anti_link))
 
-    # Bind to Render PORT
+    threading.Thread(target=expiry_worker, args=(application,), daemon=True).start()
+
     port = int(os.getenv("PORT", "10000"))
-    app.run(host="0.0.0.0", port=port)
+    # Webhook endpoint එක /webhook
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path="webhook",
+        webhook_url=None,  # setWebhook browser එකෙන් දානවා
+    )
 
 if __name__ == "__main__":
     main()
