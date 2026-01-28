@@ -1,7 +1,7 @@
 import os, time, threading
 from flask import Flask, request
 from telegram import Update
-from telegram.constants import ChatPermissions
+from telegram import ChatPermissions
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
